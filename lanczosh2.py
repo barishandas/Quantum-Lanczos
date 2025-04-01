@@ -92,6 +92,47 @@ class QuantumLanczos:
         
         return overlap
     
+    def linear_combination_of_circuits(self, circuits, coefficients):
+        """
+        Create a quantum circuit representing a linear combination of quantum states.
+        |ψ_result⟩ = c₁|ψ₁⟩ + c₂|ψ₂⟩ + ... + cₙ|ψₙ⟩
+        
+        Args:
+            circuits (list): List of quantum circuits preparing states |ψᵢ⟩
+            coefficients (list): List of complex coefficients cᵢ
+            
+        Returns:
+            QuantumCircuit: Circuit preparing the linear combination
+        """
+        # For simulation purposes, we can work directly with statevectors
+        states = [Statevector.from_instruction(circ) for circ in circuits]
+        
+        # Initialize with the first term in the combination
+        if not states:
+            raise ValueError("No circuits provided for linear combination")
+        
+        # Create the linear combination without normalizing coefficients first
+        result_state_data = states[0].data * coefficients[0]
+        
+        # Add the remaining terms
+        for coef, state in zip(coefficients[1:], states[1:]):
+            result_state_data = result_state_data + state.data * coef
+        
+        # Now normalize the resulting state vector
+        norm = np.sqrt(np.sum(np.abs(result_state_data)**2))
+        if norm < 1e-10:  # Avoid division by zero
+            raise ValueError("Resulting state has near-zero norm")
+        
+        normalized_data = result_state_data / norm
+        
+        # Create a new circuit that prepares this state
+        result_circuit = QuantumCircuit(self.num_qubits)
+        
+        # Initialize the circuit to prepare the normalized state
+        result_circuit.initialize(normalized_data, range(self.num_qubits))
+        
+        return result_circuit
+    
     def evolve_state(self, circuit, time=1.0):
         """
         Evolve a state under the Hamiltonian: e^(-iHt)|ψ⟩
@@ -167,6 +208,10 @@ class QuantumLanczos:
             for i, v_i in enumerate(self.krylov_basis):
                 # Calculate overlap
                 overlap = self.measure_overlap(v_i, w_circuit)
+                w_circuit = self.linear_combination_of_circuits(
+                [w_circuit, v_i], 
+                [1.0, -overlap]
+            )
             
             # Calculate the norm using identity operator
             identity_op = SparsePauliOp([Pauli('I' * self.num_qubits)], [1.0])
@@ -179,7 +224,7 @@ class QuantumLanczos:
                 break
                 
             # Normalize to get the next basis vector
-            v_next = w_circuit  # Simplified for this example
+            v_next = self.linear_combination_of_circuits([w_circuit], [1.0/w_norm])  # Simplified for this example
             
             self.krylov_basis.append(v_next)
             v_current = v_next
